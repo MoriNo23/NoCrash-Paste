@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es" data-nocrash-test>
+<head>
+<meta charset="utf-8">
+<title>NoCrash Paste · banco de pruebas</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0b1120; color:#e5e7eb; font:15px/1.6 system-ui,sans-serif; }
+  main { max-width:820px; margin:0 auto; padding:40px 24px 80px; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  p.sub { color:#9ca3af; margin:0 0 28px; font-size:13px; }
+  .card { background:#111827; border:1px solid #1f2937; border-radius:14px; padding:18px; margin-bottom:18px; }
+  .editor { min-height:150px; padding:14px; border-radius:10px; background:#0b1120;
+            border:1px solid #374151; outline:none; white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:13px; }
+  .editor:empty::before { content:"Pega aquí un codebase largo…"; color:#4b5563; }
+  button { padding:8px 14px; border-radius:8px; border:0; background:#7c5cff; color:#fff; cursor:pointer; font-size:13px; }
+  button.ghost { background:transparent; border:1px solid #374151; color:#e5e7eb; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  #chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .chip { background:#1f2937; border:1px solid #374151; border-radius:999px; padding:6px 12px; font-size:12px; }
+  .chip b { color:#a78bfa; font-weight:600; }
+  code { background:#1f2937; padding:2px 6px; border-radius:5px; font-size:12px; }
+  input[type=file] { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>NoCrash Paste — banco de pruebas</h1>
+  <p class="sub">Simula el compositor de un agente web: un <code>contenteditable</code> + un uploader oculto.
+     Genera un pegado gigante, cópialo y pégalo en el editor.</p>
+
+  <div class="card">
+    <div class="row">
+      <button data-gen="5000">Generar ~5k chars (no intercepta)</button>
+      <button data-gen="60000">Generar ~60k chars</button>
+      <button data-gen="400000">Generar ~400k chars</button>
+      <button class="ghost" id="settings">⚙️ Ajustes (Alt+Shift+P)</button>
+    </div>
+    <p class="sub" id="genInfo" style="margin:0">Aún no has generado nada.</p>
+  </div>
+
+  <div class="card">
+    <div class="editor" contenteditable="true" id="editor"></div>
+    <input type="file" id="uploader" accept="*/*">
+    <div id="chips"></div>
+  </div>
+</main>
+
+<script>
+  // ── Uploader simulado: pinta un chip cuando recibe un archivo ──
+  const chips = document.getElementById('chips');
+  document.getElementById('uploader').addEventListener('change', (e) => {
+    for (const f of e.target.files) {
+      const c = document.createElement('div');
+      c.className = 'chip';
+      c.innerHTML = `📄 <b>${f.name}</b> · ${(f.size/1024).toFixed(1)} KB`;
+      chips.appendChild(c);
+    }
+  });
+
+  // ── Generador de codebases falsos ──
+  function fakeCode(targetChars) {
+    const chunk = (i) => `
+export function handler${i}(request, context) {
+  const { id, payload } = request.body;      // caso ${i}
+  if (!id) throw new Error('missing id in request ${i}');
+  const result = payload.items.map((item, idx) => ({
+    ...item, index: idx, hash: hashOf(item, ${i}),
+  }));
+  return context.json({ ok: true, count: result.length, result });
+}
+`;
+    let out = '// archivo generado para probar NoCrash Paste\nimport { hashOf } from "./utils";\n';
+    let i = 0;
+    while (out.length < targetChars) out += chunk(i++);
+    return out;
+  }
+
+  document.querySelectorAll('[data-gen]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const text = fakeCode(Number(b.dataset.gen));
+      const lines = text.split('\n').length;
+      try {
+        await navigator.clipboard.writeText(text);
+        document.getElementById('genInfo').textContent =
+          `Copiado al portapapeles: ${text.length.toLocaleString('es-ES')} caracteres · ${lines.toLocaleString('es-ES')} líneas. Ahora pega (Ctrl+V) en el editor.`;
+      } catch (err) {
+        document.getElementById('genInfo').textContent =
+          'El navegador bloqueó el portapapeles. Selecciona el textarea de abajo y copia a mano.';
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'width:100%;height:120px;margin-top:10px';
+        b.parentElement.parentElement.appendChild(ta);
+      }
+    });
+  });
+
+  document.getElementById('settings').addEventListener('click', () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { altKey:true, shiftKey:true, code:'KeyP' }));
+  });
+</script>
+<script src="./nocrash-paste.build.js"></script>
+</body>
+</html>

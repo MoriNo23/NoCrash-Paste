@@ -1,0 +1,23 @@
+{
+  "name": "nocrash-paste",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Evita que el navegador se congele al pegar codebases enormes en agentes web: convierte el pegado en un adjunto .txt y deja un resumen legible en el editor.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "mutation": "stryker run",
+    "verify": "npm run test -- --coverage && npm run mutation && npm run build"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/vitest-runner": "^8.7.1",
+    "@vitest/coverage-v8": "^2.1.8",
+    "esbuild": "^0.24.2",
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.8"
+  }
+}
