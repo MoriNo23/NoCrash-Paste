@@ -101,15 +101,30 @@ describe('geminiAdapter.ensureFileInput', () => {
     expect(input.id).toBe('tardio');
   });
 
-  it('cierra el menú que abrió (Escape) para no dejar UI colgando', async () => {
-    document.body.innerHTML = '<button aria-label="attach file">+</button>';
-    const keys = [];
-    document.body.addEventListener('keydown', (e) => keys.push(e.key));
-    await geminiAdapter.ensureFileInput({ doc: document, timeout: 30, step: 10 });
-    expect(keys).toContain('Escape');
+  it('cliquea el item "Archivos" del menú para forzar el input', async () => {
+    document.body.innerHTML = `
+      <button aria-label="Cargas y herramientas">+</button>
+      <div role="menu"><div role="menuitem" aria-label="Subir archivos. Archivos de código">Subir</div></div>`;
+    const opener = document.querySelector('button');
+    const item = document.querySelector('[role="menuitem"]');
+    let opened = false, itemClicked = false;
+    opener.addEventListener('click', () => { opened = true; });
+    item.addEventListener('click', () => {
+      itemClicked = true;
+      setTimeout(() => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        document.body.appendChild(input);
+      }, 5);
+    });
+    const input = await geminiAdapter.ensureFileInput({ doc: document, timeout: 200, step: 5 });
+    expect(opened).toBe(true);
+    expect(itemClicked).toBe(true);
+    expect(input).not.toBeNull();
   });
 
   it('devuelve null (sin colgarse) si el input nunca aparece', async () => {
+    document.body.innerHTML = '<button aria-label="cargas y herramientas">+</button>';
     const input = await geminiAdapter.ensureFileInput({ doc: document, timeout: 40, step: 10 });
     expect(input).toBeNull();
   });
@@ -121,7 +136,7 @@ describe('geminiAdapter.attach', () => {
     const changes = vi.fn();
     document.querySelector('input').addEventListener('change', changes);
 
-    expect(await geminiAdapter.attach(file(), { doc: document })).toBe(true);
+    expect(await geminiAdapter.attach(file(), { doc: document })).toBe('input');
     expect(document.querySelector('input').files[0].name).toBe('pegado.txt');
     expect(changes).toHaveBeenCalledOnce();
   });
@@ -131,7 +146,7 @@ describe('geminiAdapter.attach', () => {
     const drops = vi.fn();
     document.getElementById('editor').addEventListener('drop', drops);
 
-    expect(await geminiAdapter.attach(file(), { doc: document, timeout: 30 })).toBe(true);
+    expect(await geminiAdapter.attach(file(), { doc: document, timeout: 30 })).toBe('drop');
     expect(drops).toHaveBeenCalledOnce();
     expect(drops.mock.calls[0][0].dataTransfer.files[0].name).toBe('pegado.txt');
   });
@@ -139,7 +154,7 @@ describe('geminiAdapter.attach', () => {
   it('como último recurso suelta el archivo en el body', async () => {
     const drops = vi.fn();
     document.body.addEventListener('drop', drops);
-    expect(await geminiAdapter.attach(file(), { doc: document, timeout: 30 })).toBe(true);
+    expect(await geminiAdapter.attach(file(), { doc: document, timeout: 30 })).toBe('drop');
     expect(drops).toHaveBeenCalledOnce();
   });
 });

@@ -18,6 +18,7 @@ export const SKIP = Object.freeze({
 export const RESULT = Object.freeze({
   ATTACHED: 'attached',
   FALLBACK_DOWNLOAD: 'fallback-download',
+  FALLBACK_DROP: 'fallback-drop',
 });
 
 function targetOf(event) {
@@ -54,6 +55,7 @@ export function createPasteHandler(deps) {
     // Stryker disable next-line ArrowFunction
     log = () => {},
     settleDelay = 120,
+    showPreview = () => {},
   } = deps;
 
   return async function onPaste(event) {
@@ -82,24 +84,38 @@ export function createPasteHandler(deps) {
     const fileName = buildFileName(language, now());
     const file = makeFile(text, fileName);
 
-    let attached = false;
+    let attachResult = false;
     try {
-      attached = !!(await adapter.attach(file));
+      attachResult = await adapter.attach(file);
     } catch (error) {
       log('fallo al adjuntar', error);
-      attached = false;
+      attachResult = false;
     }
 
-    if (!attached) {
+    // 'input' = cargado en un <input type=file> real (confirmación alta).
+    // 'drop'  = eventos sintéticos de drag&drop (confirmación baja; el sitio
+    //           puede filtrarlos). Tratamos 'drop' como no confirmado.
+    const confirmed = attachResult === 'input';
+
+    if (!confirmed) {
+      // Si el drop se disparó pero no podemos confirmar la subida, igual
+      // descargamos el .txt para que el usuario lo suba a mano.
       downloadFile(file);
-      notify(`No pude adjuntarlo automáticamente. Te lo descargué como ${fileName}: súbelo a mano.`, 'warn');
-      return { result: RESULT.FALLBACK_DOWNLOAD, fileName, metrics, language, hits };
+      const reason = attachResult === 'drop'
+        ? 'El drag&drop no es fiable en este entorno'
+        : 'No pude adjuntarlo automáticamente';
+      notify(`${reason}. Te lo descargué como ${fileName}: súbelo a mano.`, 'warn');
+      return { result: attachResult === 'drop' ? RESULT.FALLBACK_DROP : RESULT.FALLBACK_DOWNLOAD, fileName, metrics, language, hits };
     }
 
     if (config.placeholder) {
       await sleep(settleDelay); // deja que el sitio monte el chip del adjunto
       adapter.insertText(target, buildPlaceholder({ fileName, metrics, language, text, config }));
     }
+
+    // Mostrar nuestro propio preview (badge flotante clicable).
+    // Se hace siempre que attach fue confirmado, sin importar placeholder.
+    showPreview({ text, fileName, metrics });
 
     if (config.notify) {
       notify(`Pegado convertido en adjunto · ${hits.join(' · ')}`, 'ok');

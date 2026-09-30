@@ -44,6 +44,7 @@ export const SETTING_ROWS = [
   ['maxBytes', 'Máx. bytes', 'number'],
   ['previewLines', 'Líneas de preview', 'number'],
   ['placeholder', 'Dejar resumen en el editor', 'checkbox'],
+  ['preview', 'Badge de vista previa', 'checkbox'],
   ['includePreview', 'Incluir preview del código', 'checkbox'],
   ['notify', 'Mostrar aviso', 'checkbox'],
   ['debug', 'Log de depuración', 'checkbox'],

@@ -103,6 +103,8 @@ describe('createPasteHandler · interceptación', () => {
   });
 
   it('inserta un placeholder corto en vez del codebase', async () => {
+    deps = makeDeps({ config: { ...config(), placeholder: true } });
+    onPaste = createPasteHandler(deps);
     const text = bigCode();
     await onPaste(makePasteEvent({ text }));
 
@@ -113,6 +115,8 @@ describe('createPasteHandler · interceptación', () => {
   });
 
   it('espera antes de escribir para que el sitio monte el chip', async () => {
+    deps = makeDeps({ config: { ...config(), placeholder: true } });
+    onPaste = createPasteHandler(deps);
     await onPaste(makePasteEvent({ text: bigCode() }));
     expect(deps.sleep).toHaveBeenCalledWith(120);
   });

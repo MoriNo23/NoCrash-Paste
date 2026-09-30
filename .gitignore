@@ -3,3 +3,9 @@ coverage/
 reports/
 .stryker-tmp/
 test/nocrash-paste.build.js
+
+# Capturas de pagina para reproducir el bug (no son fuente)
+browsers/
+*.zip
+gemini.google.com/
+text_gemini*.json

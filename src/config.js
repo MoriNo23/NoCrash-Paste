@@ -10,7 +10,8 @@ export const DEFAULTS = Object.freeze({
   maxChars: 20000,
   maxLines: 1500,
   maxBytes: 200000,
-  placeholder: true,
+  placeholder: false,
+  preview: true,
   includePreview: true,
   previewLines: 12,
   notify: true,
@@ -21,7 +22,7 @@ export const STORE_KEY = 'nocrash-paste:config';
 
 /** Claves numéricas: se saneen al leer/guardar para no romper la comparación. */
 const NUMERIC_KEYS = ['maxChars', 'maxLines', 'maxBytes', 'previewLines'];
-const BOOLEAN_KEYS = ['placeholder', 'includePreview', 'notify', 'debug'];
+const BOOLEAN_KEYS = ['placeholder', 'preview', 'includePreview', 'notify', 'debug'];
 
 /**
  * Crea un almacén sobre GM_* si existe, con fallback a localStorage y, si

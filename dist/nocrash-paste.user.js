@@ -89,14 +89,23 @@
 
   // src/adapters/gemini.js
   var OPENER_SELECTOR = [
+    'button[aria-label*="cargas" i]',
+    'button[aria-label*="upload" i]',
     'button[aria-label*="adjunt" i]',
     'button[aria-label*="attach" i]',
     'button[aria-label*="añadir archivo" i]',
     'button[aria-label*="add file" i]',
     "uploader-button button"
   ].join(",");
+  var MENU_ITEM_SELECTOR = [
+    '[role="menuitem"][aria-label*="archivos" i]',
+    '[role="menuitem"][aria-label*="subir" i]',
+    '[role="menuitem"][aria-label*="upload" i]',
+    'mat-mdc-menu-item[aria-label*="archivos" i]',
+    'mat-mdc-menu-item[aria-label*="subir" i]'
+  ].join(",");
   var EDITOR_SELECTOR = 'rich-textarea, .ql-editor, [contenteditable="true"]';
-  var DEFAULT_TIMEOUT_MS = 2500;
+  var DEFAULT_TIMEOUT_MS = 4e3;
   var POLL_STEP_MS = 100;
   var TEXT_ACCEPTS = ["*/*", "text/*", "text/plain", ".txt"];
   function acceptsText(accept) {
@@ -115,27 +124,48 @@
       const inputs = [...doc.querySelectorAll('input[type="file"]')];
       return inputs.find((input) => acceptsText(input.accept)) || inputs[0] || null;
     },
-    /** Si el input aún no está montado, abrimos el menú "+" para forzarlo. */
+    /** Si el input aún no está montado, abrimos el menú "+" y cliqueamos el
+     * item "Archivos" para forzar la creación del input[type=file].
+     * Gemini llama input.click() automáticamente tras crearlo, lo que abre
+     * el file picker nativo — suprimimos ese click porque nosotros ya
+     * inyectamos el archivo programáticamente. */
     async ensureFileInput({ doc = document, timeout = DEFAULT_TIMEOUT_MS, step = POLL_STEP_MS } = {}) {
       let input = this.findFileInput(doc);
       if (input) return input;
       const opener = doc.querySelector(OPENER_SELECTOR);
-      if (opener) opener.click();
-      const deadline = Date.now() + timeout;
-      while (!input && Date.now() < deadline) {
-        await sleep(step);
-        input = this.findFileInput(doc);
+      if (!opener) return null;
+      const HTMLInputProto = doc.defaultView?.HTMLInputElement?.prototype;
+      const origClick = HTMLInputProto?.click;
+      let suppressed = false;
+      if (HTMLInputProto && origClick) {
+        HTMLInputProto.click = function() {
+          if (this.type === "file") {
+            suppressed = true;
+            return;
+          }
+          return origClick.call(this);
+        };
       }
-      if (opener) {
-        doc.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      try {
+        opener.click();
+        await sleep(step);
+        const menuItem = doc.querySelector(MENU_ITEM_SELECTOR);
+        if (menuItem) menuItem.click();
+        const deadline = Date.now() + timeout;
+        while (!input && Date.now() < deadline) {
+          await sleep(step);
+          input = this.findFileInput(doc);
+        }
+      } finally {
+        if (HTMLInputProto && origClick) HTMLInputProto.click = origClick;
       }
       return input;
     },
     async attach(file, { doc = document, timeout = DEFAULT_TIMEOUT_MS } = {}) {
       const input = await this.ensureFileInput({ doc, timeout });
-      if (input) return setInputFile(input, file);
+      if (input) return setInputFile(input, file) ? "input" : false;
       const zone = doc.querySelector(EDITOR_SELECTOR) || doc.body;
-      return dropFileOn(zone, file);
+      return dropFileOn(zone, file) ? "drop" : false;
     },
     insertText(element, text) {
       const editor = element.closest?.('.ql-editor, [contenteditable="true"]') || element;
@@ -164,7 +194,8 @@
     maxChars: 2e4,
     maxLines: 1500,
     maxBytes: 2e5,
-    placeholder: true,
+    placeholder: false,
+    preview: true,
     includePreview: true,
     previewLines: 12,
     notify: true,
@@ -172,7 +203,7 @@
   });
   var STORE_KEY = "nocrash-paste:config";
   var NUMERIC_KEYS = ["maxChars", "maxLines", "maxBytes", "previewLines"];
-  var BOOLEAN_KEYS = ["placeholder", "includePreview", "notify", "debug"];
+  var BOOLEAN_KEYS = ["placeholder", "preview", "includePreview", "notify", "debug"];
   function createStore(env = {}) {
     const { getValue, setValue, storage } = env;
     let memory = null;
@@ -329,7 +360,8 @@
   });
   var RESULT = Object.freeze({
     ATTACHED: "attached",
-    FALLBACK_DOWNLOAD: "fallback-download"
+    FALLBACK_DOWNLOAD: "fallback-download",
+    FALLBACK_DROP: "fallback-drop"
   });
   function targetOf(event) {
     const path = typeof event.composedPath === "function" ? event.composedPath() : null;
@@ -351,7 +383,9 @@
       // Stryker disable next-line ArrowFunction
       log = () => {
       },
-      settleDelay = 120
+      settleDelay = 120,
+      showPreview = () => {
+      }
     } = deps;
     return async function onPaste(event) {
       const clipboard = event.clipboardData;
@@ -370,22 +404,25 @@
       const language = detectLanguage(text);
       const fileName = buildFileName(language, now());
       const file = makeFile2(text, fileName);
-      let attached = false;
+      let attachResult = false;
       try {
-        attached = !!await adapter.attach(file);
+        attachResult = await adapter.attach(file);
       } catch (error) {
         log("fallo al adjuntar", error);
-        attached = false;
+        attachResult = false;
       }
-      if (!attached) {
+      const confirmed = attachResult === "input";
+      if (!confirmed) {
         downloadFile2(file);
-        notify(`No pude adjuntarlo automáticamente. Te lo descargué como ${fileName}: súbelo a mano.`, "warn");
-        return { result: RESULT.FALLBACK_DOWNLOAD, fileName, metrics, language, hits };
+        const reason = attachResult === "drop" ? "El drag&drop no es fiable en este entorno" : "No pude adjuntarlo automáticamente";
+        notify(`${reason}. Te lo descargué como ${fileName}: súbelo a mano.`, "warn");
+        return { result: attachResult === "drop" ? RESULT.FALLBACK_DROP : RESULT.FALLBACK_DOWNLOAD, fileName, metrics, language, hits };
       }
       if (config.placeholder) {
         await sleep2(settleDelay);
         adapter.insertText(target, buildPlaceholder({ fileName, metrics, language, text, config }));
       }
+      showPreview({ text, fileName, metrics });
       if (config.notify) {
         notify(`Pegado convertido en adjunto · ${hits.join(" · ")}`, "ok");
       }
@@ -393,8 +430,157 @@
     };
   }
 
-  // src/ui.js
+  // src/preview.js
   var Z = 2147483647;
+  var BADGE_TTL_MS = 5 * 60 * 1e3;
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function createPreview({ config, doc = document } = {}) {
+    if (!config?.preview) return () => {
+    };
+    const overlay = createPreviewOverlay(doc);
+    let badge = null;
+    let badgeTimer = null;
+    function removeBadge() {
+      clearTimeout(badgeTimer);
+      badge?.remove();
+      badge = null;
+    }
+    return function show({ text, fileName, metrics }) {
+      removeBadge();
+      badge = doc.createElement("div");
+      badge.className = "nocrash-preview-badge";
+      badge.setAttribute("role", "button");
+      badge.setAttribute("tabindex", "0");
+      badge.title = "Click para ver el contenido completo del adjunto";
+      Object.assign(badge.style, {
+        position: "fixed",
+        top: "16px",
+        right: "16px",
+        zIndex: String(Z - 1),
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "8px 16px",
+        borderRadius: "22px",
+        cursor: "pointer",
+        background: "#7c5cff",
+        color: "#fff",
+        font: "12px/1.4 system-ui, sans-serif",
+        userSelect: "none",
+        whiteSpace: "nowrap",
+        maxWidth: "380px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        boxShadow: "0 4px 16px rgba(124,92,255,.4)",
+        transition: "background .15s ease, opacity .25s ease",
+        opacity: "0"
+      });
+      badge.addEventListener("mouseenter", () => {
+        badge.style.background = "#6940e8";
+      });
+      badge.addEventListener("mouseleave", () => {
+        badge.style.background = "#7c5cff";
+      });
+      badge.addEventListener("click", () => overlay(text, fileName, metrics));
+      badge.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          badge.click();
+        }
+      });
+      const label = `${fileName} · ${metrics.lines.toLocaleString("es")} líneas`;
+      badge.textContent = `📄 ${label}  ▶`;
+      doc.body.appendChild(badge);
+      requestAnimationFrame(() => {
+        badge.style.opacity = "1";
+      });
+      badgeTimer = setTimeout(removeBadge, BADGE_TTL_MS);
+      return badge;
+    };
+  }
+  function createPreviewOverlay(doc = document) {
+    let backdrop = null;
+    function close() {
+      if (!backdrop) return;
+      const el = backdrop;
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 200);
+      backdrop = null;
+      doc.removeEventListener("keydown", onKeydown, true);
+    }
+    function onKeydown(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      }
+    }
+    return function show(text, fileName, metrics) {
+      if (backdrop) close();
+      backdrop = doc.createElement("div");
+      backdrop.id = "nocrash-preview-overlay";
+      Object.assign(backdrop.style, {
+        position: "fixed",
+        inset: "0",
+        zIndex: String(Z),
+        background: "rgba(0,0,0,.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: "0",
+        transition: "opacity .2s ease",
+        font: "14px/1.5 system-ui, sans-serif"
+      });
+      const lines = text.split("\n");
+      const lineNumbers = lines.map((_, i) => i + 1).join("\n");
+      const meta = `${metrics.chars.toLocaleString("es")} caracteres · ${metrics.lines.toLocaleString("es")} líneas`;
+      backdrop.innerHTML = `
+      <div data-panel style="background:#1a1a2e;color:#e5e7eb;border-radius:14px;
+        width:min(92vw,1024px);height:min(86vh,720px);display:flex;flex-direction:column;
+        box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+          padding:14px 20px;border-bottom:1px solid #374151;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <span style="font-size:20px;flex-shrink:0">📄</span>
+            <div style="min-width:0">
+              <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(fileName)}</div>
+              <div style="font-size:12px;color:#9ca3af">${escapeHtml(meta)}</div>
+            </div>
+          </div>
+          <button data-action="close" aria-label="Cerrar" style="background:none;border:none;
+            color:#9ca3af;cursor:pointer;font-size:24px;padding:2px 10px;line-height:1;
+            flex-shrink:0;border-radius:6px">×</button>
+        </div>
+        <div data-scroll style="flex:1;overflow:auto;display:flex;min-height:0">
+          <pre data-linenos style="margin:0;padding:14px 10px;text-align:right;
+            color:#4b5563;font:13px/1.6 'Menlo','Consolas','DejaVu Sans Mono',monospace;
+            user-select:none;border-right:1px solid #374151;white-space:pre;tab-size:4">${escapeHtml(lineNumbers)}</pre>
+          <pre data-code style="margin:0;padding:14px 18px;flex:1;min-width:0;
+            font:13px/1.6 'Menlo','Consolas','DejaVu Sans Mono',monospace;
+            white-space:pre-wrap;word-break:break-word;color:#e5e7eb;tab-size:4">${escapeHtml(text)}</pre>
+        </div>
+      </div>`;
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop || e.target?.dataset?.action === "close") close();
+      });
+      doc.addEventListener("keydown", onKeydown, true);
+      doc.body.appendChild(backdrop);
+      requestAnimationFrame(() => {
+        if (backdrop) backdrop.style.opacity = "1";
+      });
+      const scrollContainer = backdrop.querySelector("[data-scroll]");
+      const lineEl = backdrop.querySelector("[data-linenos]");
+      scrollContainer?.addEventListener("scroll", () => {
+        if (lineEl) lineEl.scrollTop = scrollContainer.scrollTop;
+      }, { passive: true });
+      return backdrop;
+    };
+  }
+
+  // src/ui.js
+  var Z2 = 2147483647;
   function createToaster(doc = document) {
     return function toast(message, kind = "ok", ttl = 4200) {
       const el = doc.createElement("div");
@@ -402,7 +588,7 @@
       el.textContent = message;
       Object.assign(el.style, {
         position: "fixed",
-        zIndex: String(Z),
+        zIndex: String(Z2),
         bottom: "24px",
         left: "50%",
         transform: "translateX(-50%)",
@@ -434,6 +620,7 @@
     ["maxBytes", "Máx. bytes", "number"],
     ["previewLines", "Líneas de preview", "number"],
     ["placeholder", "Dejar resumen en el editor", "checkbox"],
+    ["preview", "Badge de vista previa", "checkbox"],
     ["includePreview", "Incluir preview del código", "checkbox"],
     ["notify", "Mostrar aviso", "checkbox"],
     ["debug", "Log de depuración", "checkbox"]
@@ -453,7 +640,7 @@
       Object.assign(backdrop.style, {
         position: "fixed",
         inset: "0",
-        zIndex: String(Z),
+        zIndex: String(Z2),
         background: "rgba(0,0,0,.55)",
         display: "grid",
         placeItems: "center",
@@ -539,7 +726,8 @@
       downloadFile,
       notify: toast,
       sleep,
-      log
+      log,
+      showPreview: createPreview({ config })
     });
     document.addEventListener("paste", handler, true);
     const openSettings = createSettingsPanel({

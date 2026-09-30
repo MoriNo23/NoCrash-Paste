@@ -21,7 +21,7 @@ export function makeFakeAdapter(overrides = {}) {
     id: 'fake',
     matches: () => true,
     isEditor: vi.fn(() => true),
-    attach: vi.fn(async () => true),
+    attach: vi.fn(async () => 'input'),
     insertText: vi.fn(() => true),
     ...overrides,
   };

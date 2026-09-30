@@ -30,7 +30,7 @@ describe('constantes públicas (contrato con el resto del código)', () => {
   });
 
   it('RESULT tiene valores literales estables y distintos', () => {
-    expect(RESULT).toEqual({ ATTACHED: 'attached', FALLBACK_DOWNLOAD: 'fallback-download' });
+    expect(RESULT).toEqual({ ATTACHED: 'attached', FALLBACK_DOWNLOAD: 'fallback-download', FALLBACK_DROP: 'fallback-drop' });
     expect(RESULT.ATTACHED).not.toBe(RESULT.FALLBACK_DOWNLOAD);
   });
 
@@ -44,7 +44,8 @@ describe('constantes públicas (contrato con el resto del código)', () => {
       maxChars: 20000,
       maxLines: 1500,
       maxBytes: 200000,
-      placeholder: true,
+      placeholder: false,
+      preview: true,
       includePreview: true,
       previewLines: 12,
       notify: true,
@@ -72,7 +73,7 @@ describe('normalizeConfig · cada clave se respeta individualmente', () => {
     }
   });
 
-  it.each(['placeholder', 'includePreview', 'notify', 'debug'])('respeta el flag %s', (key) => {
+  it.each(['placeholder', 'preview', 'includePreview', 'notify', 'debug'])('respeta el flag %s', (key) => {
     expect(normalizeConfig({ [key]: !DEFAULTS[key] })[key]).toBe(!DEFAULTS[key]);
   });
 
@@ -186,13 +187,13 @@ describe('handler · detalles observables', () => {
   });
 
   it('el retardo antes de escribir es configurable', async () => {
-    const deps = makeDeps({ config: { ...DEFAULTS }, settleDelay: 999 });
+    const deps = makeDeps({ config: { ...DEFAULTS, placeholder: true }, settleDelay: 999 });
     await createPasteHandler(deps)(makePasteEvent({ text: bigCode() }));
     expect(deps.sleep).toHaveBeenCalledWith(999);
   });
 
   it('separa los motivos con " · " en el aviso', async () => {
-    const deps = makeDeps({ config: { ...DEFAULTS } });
+    const deps = makeDeps({ config: { ...DEFAULTS, placeholder: true } });
     await createPasteHandler(deps)(makePasteEvent({ text: bigCode() }));
     expect(deps.notify.mock.calls[0][0]).toMatch(/caracteres · [\d.]+ líneas/);
   });
@@ -435,12 +436,18 @@ describe('gemini · detalles del adaptador', () => {
     expect(keys).toEqual([]);
   });
 
-  it('el Escape que cierra el menú burbujea', async () => {
-    document.body.innerHTML = '<button aria-label="Adjuntar archivo">+</button>';
-    const keys = [];
-    document.addEventListener('keydown', (e) => keys.push(e.key)); // en document, no en body
+  it('el opener y el item del menú son cliqueados', async () => {
+    document.body.innerHTML = `
+      <button aria-label="Cargas y herramientas">+</button>
+      <div role="menu"><div role="menuitem" aria-label="Subir archivos">Subir</div></div>`;
+    const opener = document.querySelector('button');
+    const item = document.querySelector('[role="menuitem"]');
+    let opened = false, itemClicked = false;
+    opener.addEventListener('click', () => { opened = true; });
+    item.addEventListener('click', () => { itemClicked = true; });
     await geminiAdapter.ensureFileInput({ doc: document, timeout: 20, step: 5 });
-    expect(keys).toContain('Escape');
+    expect(opened).toBe(true);
+    expect(itemClicked).toBe(true);
   });
 
   it('attach respeta el timeout que se le pasa', async () => {

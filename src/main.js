@@ -3,6 +3,7 @@ import { sandboxAdapter } from './adapters/sandbox.js';
 import { createStore, loadConfig, normalizeConfig } from './config.js';
 import { downloadFile, makeFile, sleep } from './dom.js';
 import { createPasteHandler } from './handler.js';
+import { createPreview } from './preview.js';
 import { createSettingsPanel, createToaster } from './ui.js';
 
 export const ADAPTERS = [sandboxAdapter, geminiAdapter];
@@ -39,6 +40,7 @@ export function bootstrap({ adapters = ADAPTERS, gm = {} } = {}) {
     notify: toast,
     sleep,
     log,
+    showPreview: createPreview({ config }),
   });
 
   document.addEventListener('paste', handler, true); // capture: antes que el sitio
